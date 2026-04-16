@@ -1,36 +1,52 @@
 import React, { useState } from 'react';
+import type { WindowAction, WindowMetaIndicator } from '../store';
+
+interface Bounds {
+    width: number;
+    height: number;
+}
 
 export interface ModuleWindowProps {
     id: string;
     title: string;
     badge?: string;
     isActive?: boolean;
+    isMinimized?: boolean;
     children: React.ReactNode;
     toolbar?: React.ReactNode;
     subtabs?: React.ReactNode;
     statusbar?: React.ReactNode;
+    bottomStrip?: React.ReactNode;
+    metaIndicators?: WindowMetaIndicator[];
+    actions?: WindowAction[];
+    actionStates?: Partial<Record<WindowAction['type'], boolean>>;
     style?: React.CSSProperties;
-    onClose?: () => void;
-    onMinimize?: () => void;
-    onMaximize?: () => void;
+    bounds?: Bounds;
+    onAction?: (action: WindowAction['type']) => void;
     onMove?: (x: number, y: number) => void;
-    onResize?: (w: number, h: number) => void;
+    onResize?: (w: number, h: number, x?: number, y?: number) => void;
     onFocus?: () => void;
 }
+
+const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
 export function ModuleWindow({
     id,
     title,
     badge,
     isActive = false,
+    isMinimized = false,
     children,
     toolbar,
     subtabs,
     statusbar,
+    bottomStrip,
+    metaIndicators = [],
+    actions = [],
+    actionStates,
     style,
-    onClose,
-    onMinimize,
-    onMaximize,
+    bounds,
+    onAction,
     onMove,
     onResize,
     onFocus
@@ -39,19 +55,26 @@ export function ModuleWindow({
     const [isDragging, setIsDragging] = useState(false);
     const [isResizing, setIsResizing] = useState<string | null>(null);
 
+    const initialLeft = parseFloat(String(style?.left ?? '0'));
+    const initialTop = parseFloat(String(style?.top ?? '0'));
+    const initialWidth = parseFloat(String(style?.width ?? '0'));
+    const initialHeight = parseFloat(String(style?.height ?? '0'));
+
     const handlePointerDown = (e: React.PointerEvent<HTMLElement>) => {
         onFocus?.();
         const target = e.target as HTMLElement;
         if (target.closest('.panel-actions') || target.closest('button')) return;
-        
+
         setIsDragging(true);
         const startX = e.clientX;
         const startY = e.clientY;
-        const initialLeft = parseFloat(style?.left as string || '0');
-        const initialTop = parseFloat(style?.top as string || '0');
 
         const handlePointerMove = (moveEvent: PointerEvent) => {
-            onMove?.(initialLeft + (moveEvent.clientX - startX), initialTop + (moveEvent.clientY - startY));
+            const maxLeft = Math.max(0, (bounds?.width ?? Number.MAX_SAFE_INTEGER) - initialWidth);
+            const maxTop = Math.max(0, (bounds?.height ?? Number.MAX_SAFE_INTEGER) - (isMinimized ? 28 : initialHeight));
+            const nextX = clamp(initialLeft + (moveEvent.clientX - startX), 0, maxLeft);
+            const nextY = clamp(initialTop + (moveEvent.clientY - startY), 0, maxTop);
+            onMove?.(nextX, nextY);
         };
 
         const handlePointerUp = () => {
@@ -67,34 +90,26 @@ export function ModuleWindow({
     const handleResizeStart = (e: React.PointerEvent<HTMLElement>, direction: string) => {
         e.stopPropagation();
         e.preventDefault();
+        if (isMinimized) return;
         onFocus?.();
         setIsResizing(direction);
-        
+
         const startX = e.clientX;
         const startY = e.clientY;
-        const initialWidth = parseFloat(style?.width as string || '0');
-        const initialHeight = parseFloat(style?.height as string || '0');
-        const initialLeft = parseFloat(style?.left as string || '0');
-        const initialTop = parseFloat(style?.top as string || '0');
-
         const minWidth = 320;
         const minHeight = 220;
 
         const handleResizeMove = (moveEvent: PointerEvent) => {
             const dx = moveEvent.clientX - startX;
             const dy = moveEvent.clientY - startY;
-            
+
             let newWidth = initialWidth;
             let newHeight = initialHeight;
             let newLeft = initialLeft;
             let newTop = initialTop;
 
-            if (direction.includes('e')) {
-                newWidth = Math.max(minWidth, initialWidth + dx);
-            }
-            if (direction.includes('s')) {
-                newHeight = Math.max(minHeight, initialHeight + dy);
-            }
+            if (direction.includes('e')) newWidth = Math.max(minWidth, initialWidth + dx);
+            if (direction.includes('s')) newHeight = Math.max(minHeight, initialHeight + dy);
             if (direction.includes('w')) {
                 newWidth = Math.max(minWidth, initialWidth - dx);
                 newLeft = initialLeft + (initialWidth - newWidth);
@@ -104,10 +119,14 @@ export function ModuleWindow({
                 newTop = initialTop + (initialHeight - newHeight);
             }
 
-            if (direction.includes('w') || direction.includes('n')) {
-                onMove?.(newLeft, newTop);
+            if (bounds) {
+                newLeft = clamp(newLeft, 0, Math.max(0, bounds.width - newWidth));
+                newTop = clamp(newTop, 0, Math.max(0, bounds.height - newHeight));
+                newWidth = Math.min(newWidth, bounds.width - newLeft);
+                newHeight = Math.min(newHeight, bounds.height - newTop);
             }
-            onResize?.(newWidth, newHeight);
+
+            onResize?.(newWidth, newHeight, newLeft, newTop);
         };
 
         const handleResizeEnd = () => {
@@ -123,7 +142,7 @@ export function ModuleWindow({
     return (
         <section
             id={id}
-            className={`terminal-panel ${isActive ? 'is-focused' : 'is-inactive'} ${isDragging ? 'dragging' : ''} ${isResizing ? 'resizing' : ''}`}
+            className={`terminal-panel ${isActive ? 'is-focused' : 'is-inactive'} ${isDragging ? 'dragging' : ''} ${isResizing ? 'resizing' : ''} ${isMinimized ? 'is-minimized' : ''}`}
             style={style}
             onPointerDown={() => onFocus?.()}
         >
@@ -132,39 +151,39 @@ export function ModuleWindow({
                     <span className="panel-app-icon"></span>
                     <div className="panel-titletext">
                         {title}
-                        {badge && <>{" "}<span className="panel-badge">{badge}</span></>}
+                        {badge && <span className="panel-badge">{badge}</span>}
                     </div>
                 </div>
 
                 <div className="panel-title-meta">
-                    <span className="micro-indicator">
-                        <span className="mini-dot"></span>Realtime
-                    </span>
+                    {metaIndicators.map((indicator) => (
+                        <span key={indicator.label} className="micro-indicator">
+                            {indicator.liveDot && <span className="mini-dot"></span>}
+                            {indicator.label}
+                        </span>
+                    ))}
                 </div>
 
                 <div className="panel-actions">
-                    <button className="icon-btn" title="Link">⛓</button>
-                    <button className="icon-btn" title="Pin">•</button>
-                    <button className="icon-btn" title="Minimize" onClick={onMinimize}>–</button>
-                    <button className="icon-btn" title="Maximize" onClick={onMaximize}>□</button>
-                    <button className="icon-btn close" title="Close" onClick={onClose}>×</button>
+                    {actions.map((action) => (
+                        <button
+                            key={action.type}
+                            className={`icon-btn ${actionStates?.[action.type] ? 'is-on' : ''} ${action.type === 'close' ? 'close' : ''}`.trim()}
+                            title={action.label}
+                            onClick={() => onAction?.(action.type)}
+                        >
+                            {action.icon}
+                        </button>
+                    ))}
                 </div>
             </header>
 
-            {subtabs && <nav className="panel-subtabs">{subtabs}</nav>}
-            {toolbar && <div className="panel-toolbar">{toolbar}</div>}
+            {!isMinimized && subtabs && <nav className="panel-subtabs">{subtabs}</nav>}
+            {!isMinimized && toolbar && <div className="panel-toolbar">{toolbar}</div>}
+            {!isMinimized && <div className="panel-body">{children}</div>}
+            {!isMinimized && bottomStrip && <div className="panel-bottomstrip">{bottomStrip}</div>}
+            {!isMinimized && statusbar && <footer className="panel-statusbar">{statusbar}</footer>}
 
-            <div className="panel-body">
-                {children}
-            </div>
-
-            {statusbar && (
-                <footer className="panel-statusbar">
-                    {statusbar}
-                </footer>
-            )}
-
-            {/* Resize Handles */}
             <span className="resize-handle n" onPointerDown={(e) => handleResizeStart(e, 'n')}></span>
             <span className="resize-handle s" onPointerDown={(e) => handleResizeStart(e, 's')}></span>
             <span className="resize-handle e" onPointerDown={(e) => handleResizeStart(e, 'e')}></span>

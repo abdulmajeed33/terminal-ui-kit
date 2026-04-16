@@ -1,20 +1,39 @@
 import './index.css';
+import { useEffect, useState } from 'react';
 import { ModuleWindow } from './components/ModuleWindow';
-import { DataGrid } from './components/DataGrid';
 import { TopNavigation } from './components/TopNavigation';
-import { NewsFeed } from './components/NewsFeed';
 import { useTerminalStore } from './store';
-import { useEffect } from 'react';
+import { getPanelConfig } from './panelConfig';
 
-const newsItems = [
-  { id: '1', time: '16:32', headline: 'Celebrity Cruises Forced to Cancel Sailings', source: 'CRUISE', sentiment: 'negative' as const },
-  { id: '2', time: '16:15', headline: 'Royal Caribbean Swings to 1Q Loss Amid Covid-19', source: 'DJ NEWS', sentiment: 'negative' as const },
-  { id: '3', time: '15:42', headline: 'Brent and WTI continue higher after broad risk assets rebound', source: 'ENERGY', sentiment: 'positive' as const },
-  { id: '4', time: '15:10', headline: 'Canada Apr CPI trimmed +1.8% from year ago', source: 'ECON', sentiment: 'positive' as const },
-];
+const TOPBAR_HEIGHT = 62;
+const BOTTOMBAR_HEIGHT = 34;
 
 function App() {
-  const { workspaces, activeWorkspace, gridData, updateWindowPosition, updateWindowSize, focusWindow, tickData, setWorkspace } = useTerminalStore();
+  const {
+    workspaces,
+    activeWorkspace,
+    gridData,
+    selectedWatchlistRowId,
+    summaryView,
+    chartTopPeriod,
+    chartBottomPeriod,
+    chartSummary,
+    summaryViews,
+    updateWindowPosition,
+    updateWindowSize,
+    focusWindow,
+    tickData,
+    setWorkspace,
+    setSelectedWatchlistRow,
+    setSummaryView,
+    setChartTopPeriod,
+    setChartBottomPeriod,
+    triggerWindowAction,
+  } = useTerminalStore();
+  const [workspaceBounds, setWorkspaceBounds] = useState({
+    width: window.innerWidth,
+    height: window.innerHeight - TOPBAR_HEIGHT - BOTTOMBAR_HEIGHT,
+  });
 
   const currentWorkspace = workspaces.find(w => w.id === activeWorkspace);
   const windows = currentWorkspace?.windows || [];
@@ -26,8 +45,36 @@ function App() {
     return () => clearInterval(interval);
   }, [tickData]);
 
+  useEffect(() => {
+    const handleResize = () => {
+      setWorkspaceBounds({
+        width: window.innerWidth,
+        height: window.innerHeight - TOPBAR_HEIGHT - BOTTOMBAR_HEIGHT,
+      });
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   const handleTabClick = (workspaceId: string) => {
     setWorkspace(workspaceId);
+  };
+
+  const handleChartTopPeriodChange = (label: string) => {
+    setChartTopPeriod(label);
+    if (label === '5D') setChartBottomPeriod(30);
+    if (label === '1M') setChartBottomPeriod(90);
+    if (label === '6M') setChartBottomPeriod(180);
+    if (label === '1Y') setChartBottomPeriod(365);
+  };
+
+  const handleChartBottomPeriodChange = (period: number) => {
+    setChartBottomPeriod(period);
+    if (period === 30) setChartTopPeriod('5D');
+    if (period === 90) setChartTopPeriod('1M');
+    if (period === 180) setChartTopPeriod('6M');
+    if (period === 365) setChartTopPeriod('1Y');
   };
 
   return (
@@ -39,87 +86,51 @@ function App() {
         <div className="desktop-label" id="desktopLabel">{currentWorkspace?.desktop || 'OIL OVERVIEW'}</div>
 
         {windows.map(win => (
-          <ModuleWindow
-            key={win.id}
-            id={win.id}
-            title={win.title}
-            badge={win.type === 'watchlist' ? 'list' : 'live'}
-            isActive={win.isActive}
-            style={{ left: win.x + 'px', top: win.y + 'px', width: win.w + 'px', height: win.h + 'px', zIndex: win.zIndex }}
-            onFocus={() => focusWindow(win.id)}
-            onMove={(x, y) => updateWindowPosition(win.id, x, y)}
-            onResize={(w, h) => updateWindowSize(win.id, w, h)}
-            subtabs={win.type === 'watchlist' ? (
-              <>
-                <button className="subtab">Chains</button>
-                <button className="subtab is-on">List</button>
-                <button className="subtab">Heatmap</button>
-                <button className="subtab">Ranking</button>
-              </>
-            ) : undefined}
-            toolbar={
-              win.type === 'watchlist' ? (
-                <>
-                  <button className="toolbar-btn">＋ Add...</button>
-                  <div className="toolbar-field">View <span className="muted">▾</span></div>
-                  <div className="toolbar-spacer"></div>
-                  <span className="toolbar-label">Realtime Updates Active</span>
-                </>
-              ) : (
-                <>
-                  <button className="toolbar-btn">Type ▾</button>
-                  <button className="toolbar-btn">Today ▾</button>
-                  <div className="toolbar-spacer"></div>
-                  <button className="toolbar-btn">Add Alert</button>
-                </>
-              )
-            }
-            statusbar={
-              win.type === 'watchlist' ? (
-                <>
-                  <div className="status-left">
-                    <span>Rows: 12</span>
-                    <span className="up">Change: 5</span>
-                    <span className="down">Decline: 7</span>
-                  </div>
-                  <div className="status-right">
-                    <span>Filter: None</span>
-                    <span>Demo template state</span>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="status-left">
-                    <span>Stories: 4</span>
-                    <span>Filter: Today</span>
-                  </div>
-                  <div className="status-right">
-                    <span>Live headlines enabled</span>
-                  </div>
-                </>
-              )
-            }
-          >
-            {win.type === 'watchlist' && (
-              <DataGrid
-                columns={[
-                  { key: 'symbol', label: 'Symbol', width: '78px' },
-                  { key: 'desc', label: 'Description' },
-                  { key: 'last', label: 'Last', width: '70px' },
-                  { key: 'change', label: '+/-', width: '56px' },
-                  { key: 'changePct', label: 'L +/-%', width: '64px' },
-                  { key: 'spark', label: 'Strength', width: '98px' },
-                  { key: 'time', label: 'Time', width: '74px' }
-                ]}
-                data={gridData}
-                selectedId="1"
-              />
-            )}
+          (() => {
+            const panel = getPanelConfig({
+              window: win,
+              gridData,
+              selectedWatchlistRowId,
+              onSelectWatchlistRow: setSelectedWatchlistRow,
+              summaryView,
+              onSummaryViewChange: setSummaryView,
+              summaryData: summaryViews[summaryView],
+              chartSummary,
+              chartTopPeriod,
+              onChartTopPeriodChange: handleChartTopPeriodChange,
+              chartBottomPeriod,
+              onChartBottomPeriodChange: handleChartBottomPeriodChange,
+            });
 
-            {win.type === 'news' && (
-              <NewsFeed items={newsItems} />
-            )}
-          </ModuleWindow>
+            return (
+              <ModuleWindow
+                key={win.id}
+                id={win.id}
+                title={win.title}
+                badge={win.badge}
+                isActive={win.isActive}
+                isMinimized={win.isMinimized}
+                metaIndicators={win.meta}
+                actions={win.actions}
+                actionStates={win.actionStates}
+                style={{ left: `${win.x}px`, top: `${win.y}px`, width: `${win.w}px`, height: `${win.h}px`, zIndex: win.zIndex }}
+                bounds={workspaceBounds}
+                subtabs={panel.subtabs}
+                toolbar={panel.toolbar}
+                bottomStrip={panel.bottomStrip}
+                statusbar={panel.statusbar}
+                onFocus={() => focusWindow(win.id)}
+                onMove={(x, y) => updateWindowPosition(win.id, x, y)}
+                onResize={(w, h, x, y) => {
+                  if (typeof x === 'number' && typeof y === 'number') updateWindowPosition(win.id, x, y);
+                  updateWindowSize(win.id, w, h);
+                }}
+                onAction={(action) => triggerWindowAction(win.id, action, workspaceBounds)}
+              >
+                {panel.body}
+              </ModuleWindow>
+            );
+          })()
         ))}
       </main>
 
